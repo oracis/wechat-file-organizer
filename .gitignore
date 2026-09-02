@@ -1,0 +1,17 @@
+# 凭据/个人信息（绝不入库）
+*.info
+*.credentials*
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 安装产生的备份
+skill-backups/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 归类输出（用户本地数据）
+WeChatFiles_Organized/

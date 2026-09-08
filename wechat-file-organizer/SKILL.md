@@ -1,6 +1,6 @@
 ---
 name: wechat-file-organizer
-version: 2.0.0
+version: 2.1.0
 description: 微信文件自动归类（无头版）——扫描微信接收文件目录，按类型/月份归类、去重、生成报告。零依赖、默认只读（dry-run）、绝不永久删除源文件。扫描逻辑与 GUI 应用 wechat-file-organizer-gui（main.py）同步。
 type: skill
 ---
@@ -69,6 +69,17 @@ python scripts/organize.py --source "/path/to/xwechat_files" --apply
 | `--top N` | 列出最大的前 N 个文件（默认 10，0 关闭） |
 | `--old-days N` | 超过 N 天的文件计为老旧（默认 365） |
 | `--json` | 输出 JSON（含 `accounts` 账号列表与逐文件账号归属） |
+| `--lang zh\|en` | 报告语言；CLI > 环境变量 `WFO_LANG` / `WECHAT_ORG_LANG` > 系统语言 > 中文 |
+
+### 多语言（简体中文 / English）
+
+报告、`--help`、JSON 字段与归类出来的子目录名（`文档/` ↔ `Documents/`）全部走 `scripts/i18n.py`
+词条包。新增语言只需在 `STRINGS` 中补一列 + `join_list()` 提供本地分隔符。
+
+```bash
+python scripts/organize.py --lang en   # English
+WFO_LANG=en python scripts/organize.py # 或用环境变量
+```
 
 ## 路径发现逻辑
 

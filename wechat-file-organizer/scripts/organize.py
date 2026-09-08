@@ -4,8 +4,11 @@
 微信文件自动归类 (wechat-file-organizer) — 无头版
 扫描微信接收文件，按类型/月份归类、去重、生成报告。
 
-本脚本与 GUI 应用 wechat-file-organizer-gui（main.py，v1.16.0）的扫描逻辑
+本脚本与 GUI 应用 wechat-file-organizer-gui（main.py，v1.17.0）的扫描逻辑
 保持一致，作为无头/定时任务/自动化场景的对应物。
+
+多语言：简体中文 / English，由同目录的 i18n.py 提供。
+语言优先级 --lang > 环境变量 WFO_LANG / WECHAT_ORG_LANG > 系统语言自动判定。
 
 设计原则：
 - 零依赖：仅用 Python 标准库，无需 pip install。
@@ -24,22 +27,31 @@ import sys
 import unicodedata
 from datetime import datetime
 
+# 语言包与本脚本同目录；先定语言，后面的分类名/报告文案才能按语言生成
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import i18n
+
+i18n.set_lang(i18n.lang_from_argv(sys.argv[1:]))
+
 # 平台标识：win / mac / linux
 PLATFORM = "mac" if sys.platform == "darwin" else (
     "win" if os.name == "nt" else "linux")
 
 MB = 1024 * 1024
 
-# 分类规则：扩展名 -> 类别
+# 分类规则：内部 key -> 扩展名（显示名由 i18n.cat_name 提供）
 CATEGORIES = {
-    "文档":   ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md",
-               "csv", "rtf", "wps", "ofd", "pages", "key", "numbers", "epub", "mobi"],
-    "图片":   ["png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tiff", "tif", "svg"],
-    "压缩包": ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst"],
-    "视频":   ["mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v"],
-    "音频":   ["mp3", "wav", "m4a", "aac", "flac", "ogg", "wma"],
-    "其他":   [],
+    "documents": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt",
+                  "md", "csv", "rtf", "wps", "ofd", "pages", "key", "numbers",
+                  "epub", "mobi"],
+    "images":   ["png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tiff",
+                 "tif", "svg"],
+    "archives": ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst"],
+    "videos":   ["mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v"],
+    "audio":    ["mp3", "wav", "m4a", "aac", "flac", "ogg", "wma"],
+    "others":   [],
 }
+OTHER_CAT = "others"
 EXT_TO_CAT = {}
 for _cat, _exts in CATEGORIES.items():
     for _e in _exts:
@@ -64,8 +76,9 @@ SKIP_EXTS = {
 
 # macOS 微信沙盒中 MessageTemp 下用户文件的类型子目录
 MAC_FILE_SUBDIRS = {"File", "Image", "Video", "Audio"}
-# 删除操作在 mac/linux 上的叫法（仅提示文案）
-TRASH_LABEL = {"win": "回收站", "mac": "废纸篓", "linux": "废纸篓"}[PLATFORM]
+def trash_label():
+    """删除操作在本平台上的叫法（回收站 / 废纸篓 / Recycle Bin / Trash）。"""
+    return i18n.trash_label(PLATFORM)
 
 
 # ---------- 中文宽度对齐 ----------
@@ -94,7 +107,7 @@ def log(*a):
 
 def cat_of(path):
     ext = os.path.splitext(path)[1].lstrip(".").lower()
-    return EXT_TO_CAT.get(ext, "其他")
+    return EXT_TO_CAT.get(ext, OTHER_CAT)
 
 
 def month_of(path):
@@ -104,10 +117,10 @@ def month_of(path):
     if m:
         return "%s-%s" % (m.group(1), m.group(2))
     try:
-        t = os.path.getmtime(path)
-        return datetime.fromtimestamp(t).strftime("%Y-%m")
+        ts = os.path.getmtime(path)
+        return datetime.fromtimestamp(ts).strftime("%Y-%m")
     except OSError:
-        return "未知"
+        return i18n.t("unknown")
 
 
 def sha256_of(p, chunk=1 << 20):
@@ -434,7 +447,7 @@ def send_to_recycle_bin(paths):
         return 0, []
 
     if PLATFORM == "linux":
-        return 0, [(p, "Linux 暂不支持移入%s，已跳过（未删除任何文件）" % TRASH_LABEL)
+        return 0, [(p, i18n.t("trash.linux_skip") % trash_label())
                    for p in paths]
 
     if PLATFORM == "mac":
@@ -461,7 +474,8 @@ def send_to_recycle_bin(paths):
             if ok_one:
                 ok += 1
             else:
-                failures.append((p, "移入%s失败: %s" % (TRASH_LABEL, err_one[:200])))
+                failures.append((p, i18n.t("trash.mac_fail")
+                                 % (trash_label(), err_one[:200])))
         return ok, failures
 
     import ctypes
@@ -469,7 +483,7 @@ def send_to_recycle_bin(paths):
     try:
         shell32 = ctypes.windll.shell32
     except Exception:
-        return 0, [(p, "无法调用系统%s，已跳过（未删除任何文件）" % TRASH_LABEL)
+        return 0, [(p, i18n.t("trash.win_unavailable") % trash_label())
                    for p in paths]
 
     class SHFILEOPSTRUCT(ctypes.Structure):
@@ -500,17 +514,20 @@ def send_to_recycle_bin(paths):
     rc = shell32.SHFileOperationW(ctypes.byref(op))
     if rc == 0 and not op.fAnyOperationsAborted:
         return len(paths), []
-    failures = [(p, "仍存在于磁盘 (rc=%r)" % rc) for p in paths if os.path.exists(p)]
+    failures = [(p, i18n.t("trash.still_exists") % rc)
+                for p in paths if os.path.exists(p)]
     return len(paths) - len(failures), failures
 
 
 def dest_path(dest_root, scheme, cat, month, fname, used):
+    # 输出目录里的文件夹名用当前语言的类别名
+    cat_name = i18n.cat_name(cat)
     if scheme == "month":
         rel = os.path.join(month, fname)
     elif scheme == "type-month":
-        rel = os.path.join(cat, month, fname)
+        rel = os.path.join(cat_name, month, fname)
     else:  # type
-        rel = os.path.join(cat, fname)
+        rel = os.path.join(cat_name, fname)
     base, ext = os.path.splitext(fname)
     cand = rel
     i = 1
@@ -522,44 +539,43 @@ def dest_path(dest_root, scheme, cat, month, fname, used):
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="微信文件自动归类（零依赖，默认只读 dry-run，与 GUI 版扫描逻辑一致）")
-    ap.add_argument("--source", help="微信根目录；默认自动探测本机所有微信目录（多账号合并）")
-    ap.add_argument("--dest", help="归类输出目录；默认在 source 同级建 WeChatFiles_Organized")
+    ap = argparse.ArgumentParser(description=i18n.t("app.desc"))
+    ap.add_argument("--source", help=i18n.t("arg.source"))
+    ap.add_argument("--dest", help=i18n.t("arg.dest"))
     ap.add_argument("--scheme", choices=["type", "month", "type-month"], default="type",
-                    help="归类方式（默认 type：按类型）")
-    ap.add_argument("--apply", action="store_true",
-                    help="真正复制归类（默认仅 dry-run 报告，不改动任何文件）")
+                    help=i18n.t("arg.scheme"))
+    ap.add_argument("--apply", action="store_true", help=i18n.t("arg.apply"))
     ap.add_argument("--trash", action="store_true",
-                    help="配合 --apply：复制成功后把源文件移入%s（可恢复），Linux 跳过" % TRASH_LABEL)
-    ap.add_argument("--dedupe", action="store_true",
-                    help="去重：相同内容的文件只保留一份（配合 --apply 生效）")
+                    help=i18n.t("arg.trash") % trash_label())
+    ap.add_argument("--dedupe", action="store_true", help=i18n.t("arg.dedupe"))
     ap.add_argument("--include-media", action="store_true",
-                    help="连 Image/Video 里的 .dat 也处理（默认跳过）")
-    ap.add_argument("--scan-all", action="store_true",
-                    help="扫描 FileStorage 全部子目录（含图片/视频/语音等）")
-    ap.add_argument("--top", type=int, default=10,
-                    help="报告里列出最大的前 N 个文件（默认 10，0 关闭）")
-    ap.add_argument("--old-days", type=int, default=365,
-                    help="超过该天数的文件计为“老旧”（默认 365）")
-    ap.add_argument("--json", action="store_true",
-                    help="输出 JSON（便于脚本/定时任务消费）")
+                    help=i18n.t("arg.include_media"))
+    ap.add_argument("--scan-all", action="store_true", help=i18n.t("arg.scan_all"))
+    ap.add_argument("--top", type=int, default=10, help=i18n.t("arg.top"))
+    ap.add_argument("--old-days", type=int, default=365, help=i18n.t("arg.old_days"))
+    ap.add_argument("--json", action="store_true", help=i18n.t("arg.json"))
+    ap.add_argument("--lang", choices=i18n.LANGS, default=i18n.get_lang(),
+                    help=i18n.t("arg.lang"))
     args = ap.parse_args()
+    # --lang 也要能覆盖 argv 预解析的结果（例如写在其它参数之后）
+    if args.lang != i18n.get_lang():
+        i18n.set_lang(args.lang)
 
     roots = [args.source] if args.source else find_all_wechat_dirs()
     roots = [r for r in roots if r and os.path.isdir(r)]
     if not roots:
-        msg = {"ok": False, "error": "找不到微信文件目录",
-               "hint": "请用 --source 指定微信目录，或设置 WECHAT_FILES_DIR 环境变量"}
-        log(json.dumps(msg, ensure_ascii=False) if args.json else
-            "[FAIL] 找不到微信文件目录。请用 --source 指定，或设置 WECHAT_FILES_DIR。")
+        msg = {"ok": False, "error": i18n.t("err.no_dir"),
+               "hint": i18n.t("err.no_dir_hint")}
+        log(json.dumps(msg, ensure_ascii=False) if args.json
+            else i18n.t("err.no_dir_text"))
         return 2
 
     files = collect_files(roots, include_media=args.include_media,
                           scan_all=args.scan_all)
     if not files:
-        msg = {"ok": True, "files": 0, "note": "未发现可归类的文件"}
-        log(json.dumps(msg, ensure_ascii=False) if args.json else "[SKIP] 未发现可归类的文件。")
+        msg = {"ok": True, "files": 0, "note": i18n.t("skip.none")}
+        log(json.dumps(msg, ensure_ascii=False) if args.json
+            else i18n.t("skip.none_text"))
         return 0
 
     records = []
@@ -617,11 +633,11 @@ def main():
                 if args.trash:
                     to_trash.append(r["path"])
             except OSError as e:
-                log("[WARN] 复制失败 %s: %s" % (r["path"], e))
+                log(i18n.t("warn.copy_failed") % (r["path"], e))
         if args.trash and to_trash:
             trashed, trash_failures = send_to_recycle_bin(to_trash)
             for p, reason in trash_failures:
-                log("[WARN] 移入%s失败 %s: %s" % (TRASH_LABEL, p, reason))
+                log(i18n.t("warn.trash_failed") % (p, trash_label(), reason))
 
     if args.json:
         out = {
@@ -645,41 +661,48 @@ def main():
         return 0
 
     log("=" * 50)
-    log("微信文件归类报告  (%s)" % ("APPLY 已执行" if args.apply else "DRY-RUN 只读"))
-    log("源目录: %s" % (roots[0] if len(roots) == 1 else
-                   "%d 个微信目录（已合并扫描）" % len(roots)))
+    log(i18n.t("report.title")
+        % (i18n.t("report.apply") if args.apply else i18n.t("report.dryrun")))
+    log("%s: %s" % (i18n.t("report.source"),
+                    roots[0] if len(roots) == 1
+                    else i18n.t("report.multi_source") % len(roots)))
     if len(accounts) > 1:
-        log("微信账号: %d 个（%s）" % (len(accounts), "、".join(accounts)))
+        log(i18n.t("report.accounts_line")
+            % (i18n.t("report.accounts"), len(accounts),
+               i18n.join_list(accounts)))
     log("-" * 50)
-    log("%s: %d" % (wpad("文件总数", 12), total))
-    log("%s: %s" % (wpad("总大小", 12), human(total_size)))
+    log("%s: %d" % (wpad(i18n.t("report.total_files"), 14), total))
+    log("%s: %s" % (wpad(i18n.t("report.total_size"), 14), human(total_size)))
     log("-" * 50)
-    log("按类型:")
+    log(i18n.t("report.by_type") + ":")
     for cat in CATEGORIES:
         if cat in by_cat:
             c = by_cat[cat]
-            log("  %s  %5d 个  %s" % (wpad(cat, 8), c[0], human(c[1])))
+            log(i18n.t("report.type_line")
+                % (wpad(i18n.cat_name(cat), 12), c[0], human(c[1])))
     log("-" * 50)
-    log("%s: %d 组, 重复文件 %d 个, 可节省 %s"
-        % (wpad("重复文件", 12), len(dupes), dup_count, human(dup_recover)))
-    log("%s: %d 个 (超过 %d 天)" % (wpad("老旧文件", 12), len(old), args.old_days))
+    log("%s: %s" % (wpad(i18n.t("report.dup"), 14),
+                    i18n.t("report.dup_line")
+                    % (len(dupes), dup_count, human(dup_recover))))
+    log("%s: %s" % (wpad(i18n.t("report.old"), 14),
+                    i18n.t("report.old_line") % (len(old), args.old_days)))
     if top:
         log("-" * 50)
-        log("最大的 %d 个文件:" % len(top))
+        log(i18n.t("report.top") % len(top) + ":")
         for r in top:
             acct = ("[%s] " % r["account"]) if len(accounts) > 1 else ""
             log("  %s  %s%s" % (wpad(human(r["size"]), 10), acct, r["path"]))
     log("=" * 50)
 
     if args.apply:
-        log("[OK] 已归类到: %s" % dest)
-        extra = "，去重跳过 %d 个" % skipped_dup if args.dedupe else ""
-        log("      复制 %d 个文件%s" % (copied, extra))
+        log(i18n.t("report.ok") % dest)
+        extra = i18n.t("report.dedupe_skip") % skipped_dup if args.dedupe else ""
+        log(i18n.t("report.copied") % (copied, extra))
         if args.trash:
-            log("      移入%s %d 个（失败 %d 个）" % (TRASH_LABEL, trashed,
-                                                len(trash_failures)))
+            log(i18n.t("report.trashed")
+                % (trash_label(), trashed, len(trash_failures)))
     else:
-        log("[DRY-RUN] 未做任何改动。加 --apply 才真正复制归类。")
+        log(i18n.t("report.dryrun_hint"))
     return 0
 
 

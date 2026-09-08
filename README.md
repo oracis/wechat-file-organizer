@@ -94,13 +94,45 @@ python scripts/organize.py --json          # 机器可读输出
 | `--top N` | 列出最大的前 N 个文件（默认 10，0 关闭） |
 | `--old-days N` | 超过 N 天计为老旧（默认 365） |
 | `--json` | 输出 JSON |
+| `--lang zh\|en` | 报告语言（默认按系统语言自动判定） |
 
 ### 环境变量
 
 | 变量 | 作用 |
 |---|---|
 | `WECHAT_FILES_DIR` | 覆盖微信文件目录探测 |
+| `WFO_LANG` / `WECHAT_ORG_LANG` | 报告语言 `zh` / `en`（优先级低于 `--lang`） |
 | `WORKBUDDY_SKILLS_DIR` | 覆盖 skill 安装目标目录（安装脚本用） |
+
+### 多语言（简体中文 / English）
+
+语言优先级：`--lang` > `WFO_LANG` > 系统语言自动判定 > 中文。
+归类出来的文件夹名也跟着变（英文下是 `Documents/`、`Images/` …）。
+
+```bash
+python scripts/organize.py --lang en          # English report
+python scripts/organize.py --lang zh          # 中文报告
+WFO_LANG=en python scripts/organize.py        # 也可直接用环境变量
+```
+
+```text
+==================================================
+WeChat files report  (DRY-RUN (read-only))
+Source: C:/Users/you/Documents/WeChat Files
+--------------------------------------------------
+Total files   : 1287
+Total size    : 3.4 GB
+--------------------------------------------------
+By type:
+  Documents       612 file(s)  1.8 GB
+  Images          401 file(s)  820 MB
+--------------------------------------------------
+Duplicates    : 53 groups, 73 duplicate files, 410 MB reclaimable
+==================================================
+[DRY-RUN] Nothing was changed. Add --apply to actually copy and organize.
+```
+
+词条在同目录 `scripts/i18n.py`，新增语言只需往 `STRINGS` 里补一列。
 
 ---
 
